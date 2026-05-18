@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  spectralquant-bridge:
+    build: .
+    container_name: spectralquant-bridge
+    restart: unless-stopped
+    ports:
+      - "11437:11437"
+    environment:
+      - PORT=11437
+      # Default points to the SpectralQuant server on the same host machine.
+      # If your server is on a different IP, update this value.
+      - SPECTRALQUANT_URL=http://host.docker.internal:11436
+      - MOCK_MODEL_NAME=spectralquant:latest
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
