@@ -96,6 +96,17 @@ Simply add `http://localhost:11437` as an additional Ollama endpoint in your Ope
 
 ---
 
+## Acknowledgments
+
+This bridge acts as a frontend translation layer for the core **SpectralQuant** PyTorch engine. 
+
+All credit for the underlying KV cache compression breakthroughs—specifically the discovery of universal structural properties in key vectors—belongs to **Ashwin Gopinath** and his paper: 
+> *"3% Is All You Need: Breaking TurboQuant's Compression Limit via Spectral Structure"*
+
+You can find the original core engine repository at [Dynamis-Labs/spectralquant](https://github.com/Dynamis-Labs/spectralquant).
+
+---
+
 ## Contributing
 
 We welcome contributions! Please ensure code remains lightweight with minimal dependencies.
