@@ -52,12 +52,12 @@ git clone https://github.com/kruschdev/spectralquant-ollama-bridge.git
 cd spectralquant-ollama-bridge
 
 # 2. Launch both the PyTorch backend and Node.js bridge
-docker-compose up -d --build
+docker compose up -d --build
 ```
 
 You can view the logs of the bridge to confirm it connected successfully:
 ```bash
-docker-compose logs -f spectralquant-bridge
+docker compose logs -f spectralquant-bridge
 ```
 
 You should see:
