@@ -81,6 +81,9 @@ You can customize the bridge's behavior by passing environment variables:
 | `PORT` | The port the Node.js bridge listens on. | `11437` |
 | `SPECTRALQUANT_URL` | The URL of the SpectralQuant Python proxy. | `http://127.0.0.1:11436` |
 | `MOCK_MODEL_NAME` | The fake model name exposed to Ollama clients. | `spectralquant:latest` |
+| `LOAD_IN_4BIT` | Enable bitsandbytes NF4 quantization for the base model weights, reducing VRAM usage while preserving KV compression. | `true` |
+| `MODEL_NAME` | The HuggingFace model ID to load on the backend. | `Qwen/Qwen2.5-Coder-7B-Instruct` |
+| `HF_TOKEN` | Your HuggingFace token for gated models. | *None* |
 
 ---
 
@@ -117,6 +120,7 @@ You can find the original core engine repository at [Dynamis-Labs/spectralquant]
 
 **v1.1.1:**
 - **Infrastructure Stability:** Added `docker-compose` health checks, `always` restart policies, and enforced startup ordering (`depends_on: service_healthy`) to ensure the Node.js bridge waits for the PyTorch backend to fully initialize.
+- **4-Bit (NF4) Quantization:** Native support for loading backend models in 4-bit precision via `bitsandbytes`, massively reducing baseline VRAM requirements while keeping the SpectralQuant KV cache intact. (Configurable via `LOAD_IN_4BIT=true`).
 
 **v1.1.0:**
 - **Multi-GPU Support:** The backend proxy now fully supports `device_map="auto"` via accelerate, allowing SpectralQuant states and centroids to dynamically migrate to the correct active device.
