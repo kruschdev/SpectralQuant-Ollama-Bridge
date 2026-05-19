@@ -26,7 +26,7 @@ console.log(`======================================================\n`);
 app.get('/health', async (req, res) => {
     try {
         // Attempt to reach the backend to verify it is up
-        const response = await fetch(`${SPECTRALQUANT_URL}/v1/models`);
+        const response = await fetch(`${SPECTRALQUANT_URL}/health`);
         if (response.ok) {
             res.json({ status: 'healthy', backend: 'reachable' });
         } else {

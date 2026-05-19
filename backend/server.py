@@ -45,9 +45,9 @@ async def lifespan(app: FastAPI):
     global model, tokenizer, engine_manager
     logger.info(f"Loading model {MODEL_NAME} onto {DEVICE}...")
     try:
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, local_files_only=True)
         load_kwargs = {
-            "device_map": "auto",
+            "device_map": "auto", "local_files_only": True,
         }
         if LOAD_IN_4BIT:
             from transformers import BitsAndBytesConfig

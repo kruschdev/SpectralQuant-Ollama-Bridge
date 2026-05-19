@@ -202,3 +202,30 @@ class SpectralQuantCache(DynamicCache):
         # Implementation of moving to device if needed
         # Just return self as DynamicCache's to is often not strictly implemented for full depth dict structures
         return self
+
+    def __getitem__(self, layer_idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        if layer_idx < len(self):
+            return (
+                self._decompress_states(self.sq_key_cache[layer_idx], layer_idx, "key"),
+                self._decompress_states(self.sq_value_cache[layer_idx], layer_idx, "value")
+            )
+        else:
+            raise KeyError(f"Cache only has {len(self)} layers")
+
+    def __iter__(self):
+        for layer_idx in range(len(self)):
+            yield (
+                self._decompress_states(self.sq_key_cache[layer_idx], layer_idx, "key"),
+                self._decompress_states(self.sq_value_cache[layer_idx], layer_idx, "value")
+            )
+
+    def __len__(self):
+        return len(self.sq_key_cache)
+
+    @property
+    def key_cache(self) -> List[torch.Tensor]:
+        return [self._decompress_states(self.sq_key_cache[i], i, "key") for i in range(len(self))]
+
+    @property
+    def value_cache(self) -> List[torch.Tensor]:
+        return [self._decompress_states(self.sq_value_cache[i], i, "value") for i in range(len(self))]

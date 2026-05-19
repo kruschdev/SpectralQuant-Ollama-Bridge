@@ -10,6 +10,7 @@ services:
     environment:
       - MODEL_NAME=Qwen/Qwen2.5-Coder-7B-Instruct
       - LOAD_IN_4BIT=true
+      - HF_TOKEN=${HF_TOKEN}
       - HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface
     volumes:
       - ~/.cache/huggingface:/root/.cache/huggingface
