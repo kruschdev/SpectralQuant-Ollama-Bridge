@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-Coder-7B-Instruct")
 AVG_BITS = float(os.environ.get("AVG_BITS", "6.0"))
 LOAD_IN_4BIT = os.environ.get("LOAD_IN_4BIT", "false").lower() in ("true", "1", "yes")
+LOAD_IN_8BIT = os.environ.get("LOAD_IN_8BIT", "false").lower() in ("true", "1", "yes")
 ENABLE_COMPRESSION = os.environ.get("ENABLE_COMPRESSION", "false").lower() in ("true", "1", "yes")
 DEVICE = os.environ.get("DEVICE", "cuda" if torch.cuda.is_available() else "cpu")
 
@@ -57,6 +58,12 @@ async def lifespan(app: FastAPI):
                 bnb_4bit_quant_type="nf4",
             )
             logger.info("Loading model in 4-bit quantization (bitsandbytes NF4)")
+        elif LOAD_IN_8BIT:
+            from transformers import BitsAndBytesConfig
+            load_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_8bit=True,
+            )
+            logger.info("Loading model in 8-bit quantization (bitsandbytes INT8)")
         else:
             load_kwargs["torch_dtype"] = torch.bfloat16
         model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, **load_kwargs)
@@ -83,6 +90,13 @@ async def lifespan(app: FastAPI):
                 pt_file = calib_dir / (base_name + ".pt")
                 if not pt_file.exists():
                     logger.warning("No 4-bit calibration found, falling back to bf16 calibration")
+                    base_name = f"{model_base}_wikitext103"
+            elif LOAD_IN_8BIT:
+                base_name = f"{model_base}_8bit_wikitext103"
+                # Fall back to standard calibration if 8-bit not available
+                pt_file = calib_dir / (base_name + ".pt")
+                if not pt_file.exists():
+                    logger.warning("No 8-bit calibration found, falling back to bf16 calibration")
                     base_name = f"{model_base}_wikitext103"
             else:
                 base_name = f"{model_base}_wikitext103"
