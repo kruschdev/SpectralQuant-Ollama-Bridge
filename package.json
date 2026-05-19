@@ -1,13 +1,20 @@
 {
   "name": "spectralquant-ollama-bridge",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A standalone Node.js Express proxy that enables SpectralQuant KV compression for native Ollama workflows",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["ollama", "spectralquant", "llm", "proxy", "kv-cache", "pytorch"],
+  "keywords": [
+    "ollama",
+    "spectralquant",
+    "llm",
+    "proxy",
+    "kv-cache",
+    "pytorch"
+  ],
   "author": "Krusch",
   "license": "MIT",
   "dependencies": {
