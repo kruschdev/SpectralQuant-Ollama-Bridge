@@ -107,6 +107,12 @@ You can find the original core engine repository at [Dynamis-Labs/spectralquant]
 
 ---
 
+## Compatibility Updates
+
+**v1.0.1:**
+- **Multi-GPU Support:** The backend proxy now fully supports `device_map="auto"` via accelerate, allowing SpectralQuant states and centroids to dynamically migrate to the correct active device.
+- **bfloat16 Compatibility:** Resolved NaN/Inf device-side overflow assertions by preserving native `bfloat16` precision for models like `Qwen2.5-Coder-7B-Instruct`.
+
 ## Contributing
 
 We welcome contributions! Please ensure code remains lightweight with minimal dependencies.
