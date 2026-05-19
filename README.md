@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>A lightweight, minimal-dependency Node.js bridge that brings SpectralQuant's massive KV cache compression to native Ollama workflows.</strong>
+  <strong>A transparent bridge bringing SpectralQuant's massive KV cache compression and 4-bit NF4 weight quantization to any Ollama-compatible frontend.</strong>
 </p>
 
 [![Version](https://img.shields.io/github/package-json/v/kruschdev/spectralquant-ollama-bridge.svg)](https://github.com/kruschdev/spectralquant-ollama-bridge)
