@@ -42,16 +42,22 @@ A standalone Express proxy exposing standard Ollama endpoints, translating them 
 
 ## Quick Start
 
-**Prerequisites:** [Node.js 22+](https://nodejs.org/) · SpectralQuant PyTorch Engine running (default `http://127.0.0.1:11436`)
+The repository is a "batteries-included" package containing both the **SpectralQuant PyTorch Backend** and the **Node.js Bridge**.
+
+**Prerequisites:** [Docker](https://www.docker.com/) & [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) (for GPU acceleration)
 
 ```bash
-# 1. Clone and install
+# 1. Clone the repository
 git clone https://github.com/kruschdev/spectralquant-ollama-bridge.git
 cd spectralquant-ollama-bridge
-npm install
 
-# 2. Start the bridge
-npm start
+# 2. Launch both the PyTorch backend and Node.js bridge
+docker-compose up -d --build
+```
+
+You can view the logs of the bridge to confirm it connected successfully:
+```bash
+docker-compose logs -f spectralquant-bridge
 ```
 
 You should see:
@@ -59,7 +65,7 @@ You should see:
 ======================================================
 🚀 SpectralQuant ↔ Ollama Bridge
 📡 Listening on Port: 11437
-🔗 Target Backend: http://127.0.0.1:11436
+🔗 Target Backend: http://spectralquant-server:11436
 🤖 Mock Model Name: spectralquant:latest
 ======================================================
 ```

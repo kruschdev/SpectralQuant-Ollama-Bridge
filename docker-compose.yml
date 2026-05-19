@@ -1,6 +1,26 @@
 version: '3.8'
 
 services:
+  spectralquant-server:
+    build: ./backend
+    container_name: spectralquant-server
+    restart: unless-stopped
+    ports:
+      - "11436:11436"
+    environment:
+      - MODEL_NAME=Qwen/Qwen2.5-Coder-7B-Instruct
+      - HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+      - ./backend:/app
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
   spectralquant-bridge:
     build: .
     container_name: spectralquant-bridge
@@ -9,9 +29,7 @@ services:
       - "11437:11437"
     environment:
       - PORT=11437
-      # Default points to the SpectralQuant server on the same host machine.
-      # If your server is on a different IP, update this value.
-      - SPECTRALQUANT_URL=http://host.docker.internal:11436
+      - SPECTRALQUANT_URL=http://spectralquant-server:11436
       - MOCK_MODEL_NAME=spectralquant:latest
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    depends_on:
+      - spectralquant-server
