@@ -104,6 +104,16 @@ curl http://localhost:11437/api/generate -d '{
 
 Simply add `http://localhost:11437` as an additional Ollama endpoint in your OpenWebUI settings. It will natively pick up `spectralquant:latest` as an available model!
 
+### Running 8-Bit Calibration
+
+If you wish to use 8-bit (INT8) precision with `LOAD_IN_8BIT=true`, you should generate the 8-bit specific eigenspectral matrices so the KV cache compression aligns with the quantized weights:
+
+```bash
+# Run this inside the backend container or a local python environment with requirements installed
+python backend/calibrate_8bit.py --model Qwen/Qwen2.5-Coder-7B-Instruct
+```
+This will output the required `.pt` files to `backend/calibration_data/`.
+
 ---
 
 ## Acknowledgments
