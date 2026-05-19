@@ -254,6 +254,31 @@ app.post('/api/generate', async (req, res) => {
     }
 });
 
+const FALLBACK_OLLAMA_URL = process.env.FALLBACK_OLLAMA_URL || 'http://127.0.0.1:11434';
+
+// --- /api/embeddings ---
+app.post('/api/embeddings', async (req, res) => {
+    try {
+        const response = await fetch(`${FALLBACK_OLLAMA_URL}/api/embeddings`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(req.body)
+        });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`Fallback Ollama Error ${response.status}: ${errText}`);
+        }
+
+        const data = await response.json();
+        res.json(data);
+    } catch (e) {
+        console.error(`[EMBEDDINGS ERROR]`, e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`🟢 Bridge active on 0.0.0.0:${PORT}`);
 });

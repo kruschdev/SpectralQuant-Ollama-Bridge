@@ -34,14 +34,14 @@ services:
     build: .
     container_name: spectralquant-bridge
     restart: always
+    ports:
+      - "11437:11437"
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:11437/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
-    ports:
-      - "11437:11437"
     environment:
       - PORT=11437
       - SPECTRALQUANT_URL=http://spectralquant-server:11436
