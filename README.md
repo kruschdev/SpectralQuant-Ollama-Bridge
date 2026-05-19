@@ -34,7 +34,7 @@ A standalone Express proxy exposing standard Ollama endpoints, translating them 
 
 **🛡️ Keep your existing tools** — Continue using OpenWebUI, AnythingLLM, or any other Ollama frontend you already love.
 
-**🧠 Massive memory savings** — Unlock up to 10x KV cache reduction for long-context tasks by routing through SpectralQuant.
+**🧠 The "Holy Grail" of Memory Savings** — Get a *compounding* memory discount: native 4-bit (NF4) quantization shrinks the static model weights, while SpectralQuant compresses the dynamic KV cache by up to 10x. This allows you to fit incredibly smart models with massive context windows onto single consumer GPUs (like an RTX 3060 or 2080 Ti).
 
 **⚡ Run side-by-side** — Exposes the proxy on port `11437` (a non-colliding port), so it runs peacefully alongside your default Ollama instance.
 
