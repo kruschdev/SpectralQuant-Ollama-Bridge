@@ -4,7 +4,13 @@ services:
   spectralquant-server:
     build: ./backend
     container_name: spectralquant-server
-    restart: unless-stopped
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:11436/health')\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     ports:
       - "11436:11436"
     environment:
@@ -26,7 +32,13 @@ services:
   spectralquant-bridge:
     build: .
     container_name: spectralquant-bridge
-    restart: unless-stopped
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:11437/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     ports:
       - "11437:11437"
     environment:
@@ -34,4 +46,5 @@ services:
       - SPECTRALQUANT_URL=http://spectralquant-server:11436
       - MOCK_MODEL_NAME=spectralquant:latest
     depends_on:
-      - spectralquant-server
+      spectralquant-server:
+        condition: service_healthy

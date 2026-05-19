@@ -1,6 +1,6 @@
 {
   "name": "spectralquant-ollama-bridge",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "A standalone Node.js Express proxy that enables SpectralQuant KV compression for native Ollama workflows",
   "main": "index.js",
   "scripts": {

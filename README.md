@@ -115,6 +115,9 @@ You can find the original core engine repository at [Dynamis-Labs/spectralquant]
 
 ## Compatibility Updates
 
+**v1.1.1:**
+- **Infrastructure Stability:** Added `docker-compose` health checks, `always` restart policies, and enforced startup ordering (`depends_on: service_healthy`) to ensure the Node.js bridge waits for the PyTorch backend to fully initialize.
+
 **v1.1.0:**
 - **Multi-GPU Support:** The backend proxy now fully supports `device_map="auto"` via accelerate, allowing SpectralQuant states and centroids to dynamically migrate to the correct active device.
 - **bfloat16 Compatibility:** Resolved NaN/Inf device-side overflow assertions by preserving native `bfloat16` precision for models like `Qwen2.5-Coder-7B-Instruct`.
