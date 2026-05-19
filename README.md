@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>A lightweight, zero-dependency Node.js bridge that brings SpectralQuant's massive KV cache compression to native Ollama workflows.</strong>
+  <strong>A lightweight, minimal-dependency Node.js bridge that brings SpectralQuant's massive KV cache compression to native Ollama workflows.</strong>
 </p>
 
 [![Version](https://img.shields.io/github/package-json/v/kruschdev/spectralquant-ollama-bridge.svg)](https://github.com/kruschdev/spectralquant-ollama-bridge)
@@ -28,7 +28,7 @@ A standalone Express proxy exposing standard Ollama endpoints, translating them 
 | 🔄 **Endpoint Translation** | Converts `/api/chat` and `/api/generate` Ollama JSON requests to OpenAI `fetch` requests. |
 | 🌊 **Stream Conversion** | Parses true Server-Sent Events (SSE) from the backend and converts them into Ollama NDJSON streams. |
 | 🎭 **Endpoint Mocking** | Mocks `/api/tags` so existing interfaces load cleanly without crashing. |
-| 🪶 **Zero Dependencies** | Runs purely on Express and CORS. No heavy SDKs or external tooling required. |
+| 🪶 **Minimal Dependencies** | Runs purely on Express and CORS. No heavy SDKs or external tooling required. |
 
 ## Why You'd Want It
 
