@@ -101,9 +101,7 @@ class SpectralQuantCache(DynamicCache):
             
             if modality == "key":
                 comp = engine.compress_keys_pytorch(state_h)
-                # Remove k_mse to save memory, we can reconstruct it
-                if "k_mse" in comp:
-                    del comp["k_mse"]
+                # k_mse contains the direct MSE reconstruction - keep it
             else:
                 comp = engine.compress_values_pytorch(state_h)
             
@@ -119,35 +117,24 @@ class SpectralQuantCache(DynamicCache):
         for h, comp in enumerate(compressed_heads):
             engine = self.engine_manager.get_engine(layer_idx, h, modality)
             
-            # Move engine tensors to the same device as the layer state
-            state_device = comp["indices"].device
-            if getattr(engine, '_current_device', None) != state_device:
-                engine.eigenvalues = engine.eigenvalues.to(state_device)
-                engine.Pi = engine.Pi.to(state_device)
-                engine.PiT = engine.PiT.to(state_device)
-                engine.S = engine.S.to(state_device)
-                engine.ST = engine.ST.to(state_device)
-                if hasattr(engine, '_centroids_key_high'):
-                    engine._centroids_key_high = engine._centroids_key_high.to(state_device)
-                    engine._centroids_key_low = engine._centroids_key_low.to(state_device)
-                    engine._centroids_val_high = engine._centroids_val_high.to(state_device)
-                    engine._centroids_val_low = engine._centroids_val_low.to(state_device)
-                engine._current_device = state_device
-            
-            if modality == "value":
-                recon_h = engine.decompress_values_pytorch(comp)  # [seq_len, head_dim]
+            if modality == "key":
+                # Use the pre-computed MSE reconstruction
+                recon_h = comp["k_mse"].to(torch.bfloat16)
             else:
-                # Reconstruct keys using value logic (MSE reconstruction)
-                indices = comp["indices"]
-                vec_norms = comp["vec_norms"].float()
-                d_eff = comp["d_eff"]
-                idx_high = indices[:, :d_eff].long()
-                idx_low = indices[:, d_eff:].long()
-                y_hat_high = engine._centroids_key_high.to(indices.device)[idx_high]
-                y_hat_low = engine._centroids_key_low.to(indices.device)[idx_low]
-                y_hat = torch.cat([y_hat_high, y_hat_low], dim=-1)
-                recon_h = (y_hat @ engine.Pi.float()) * vec_norms.unsqueeze(-1)
-                recon_h = recon_h.to(torch.bfloat16)
+                # Use the engine's own decompress method
+                # Move engine tensors to the correct device first
+                state_device = comp["indices"].device
+                if getattr(engine, '_current_device', None) != state_device:
+                    engine.eigenvalues = engine.eigenvalues.to(state_device)
+                    engine.Pi = engine.Pi.to(state_device)
+                    engine.PiT = engine.PiT.to(state_device)
+                    engine.S = engine.S.to(state_device)
+                    engine.ST = engine.ST.to(state_device)
+                    if hasattr(engine, '_centroids_val_high'):
+                        engine._centroids_val_high = engine._centroids_val_high.to(state_device)
+                        engine._centroids_val_low = engine._centroids_val_low.to(state_device)
+                    engine._current_device = state_device
+                recon_h = engine.decompress_values_pytorch(comp)
             
             uncompressed_heads.append(recon_h)
         return torch.stack(uncompressed_heads, dim=0).unsqueeze(0)  # [1, num_heads, seq_len, head_dim]
