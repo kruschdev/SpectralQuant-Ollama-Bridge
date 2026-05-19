@@ -5,6 +5,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Request logging middleware
+app.use((req, res, next) => {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+    next();
+});
+
 const PORT = process.env.PORT || 11437;
 const SPECTRALQUANT_URL = process.env.SPECTRALQUANT_URL || 'http://127.0.0.1:11436';
 const MOCK_MODEL_NAME = process.env.MOCK_MODEL_NAME || 'spectralquant:latest';
@@ -15,6 +21,21 @@ console.log(`📡 Listening on Port: ${PORT}`);
 console.log(`🔗 Target Backend: ${SPECTRALQUANT_URL}`);
 console.log(`🤖 Mock Model Name: ${MOCK_MODEL_NAME}`);
 console.log(`======================================================\n`);
+
+// --- Health Check ---
+app.get('/health', async (req, res) => {
+    try {
+        // Attempt to reach the backend to verify it is up
+        const response = await fetch(`${SPECTRALQUANT_URL}/v1/models`);
+        if (response.ok) {
+            res.json({ status: 'healthy', backend: 'reachable' });
+        } else {
+            res.status(503).json({ status: 'degraded', backend: 'unreachable', details: response.statusText });
+        }
+    } catch (e) {
+        res.status(503).json({ status: 'down', backend: 'unreachable', error: e.message });
+    }
+});
 
 // --- /api/tags ---
 // Mocks the Ollama model list so UIs like OpenWebUI don't crash
@@ -57,6 +78,10 @@ app.post('/api/chat', async (req, res) => {
 
         if (!response.ok) {
             const errText = await response.text();
+            if (response.status === 429) {
+                res.status(429).json({ error: "Backend rate limit exceeded", details: errText });
+                return;
+            }
             throw new Error(`Backend Error ${response.status}: ${errText}`);
         }
 
@@ -155,6 +180,10 @@ app.post('/api/generate', async (req, res) => {
 
         if (!response.ok) {
             const errText = await response.text();
+            if (response.status === 429) {
+                res.status(429).json({ error: "Backend rate limit exceeded", details: errText });
+                return;
+            }
             throw new Error(`Backend Error ${response.status}: ${errText}`);
         }
 
