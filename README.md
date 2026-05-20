@@ -81,8 +81,7 @@ You can customize the bridge's behavior by passing environment variables:
 | `PORT` | The port the Node.js bridge listens on. | `11437` |
 | `SPECTRALQUANT_URL` | The URL of the SpectralQuant Python proxy. | `http://127.0.0.1:11436` |
 | `MOCK_MODEL_NAME` | The fake model name exposed to Ollama clients. | `spectralquant:latest` |
-| `LOAD_IN_4BIT` | Enable bitsandbytes NF4 quantization for the base model weights, reducing VRAM usage while preserving KV compression. | `true` |
-| `LOAD_IN_8BIT` | Enable bitsandbytes INT8 quantization. If both are set, 4-bit takes precedence. | `false` |
+
 | `MODEL_NAME` | The HuggingFace model ID to load on the backend. | `Qwen/Qwen2.5-Coder-7B-Instruct` |
 | `HF_TOKEN` | Your HuggingFace token for gated models. | *None* |
 
@@ -133,7 +132,7 @@ You can find the original core engine repository at [Dynamis-Labs/spectralquant]
 - **PyTorch `torch.compile` JIT Fusion:** Fused cache quantization and decompression routines into fast GPU kernels using PyTorch's Inductor JIT compiler, significantly reducing Python runtime overhead. Added a working C++ compiler (`g++`) inside the backend container to support Triton/CPU compilation loops.
 - **High-Performance Keep-Alive Pooling:** Configured global `undici` socket connection pooling within the Express proxy (`connections: 100`, 10 min timeout), eliminating socket handshake and connection setup latency for high-frequency queries.
 - **Zero-Copy Stream Forwarding:** Implemented fast, parsing-free SSE stream piping (`Readable.from(response.body).pipe(res)`) on `/v1/chat/completions`, eliminating JSON-parsing overhead.
-- **Pre-Quantized Model Auto-Bypass:** Automatically detects pre-quantized models (e.g. AWQ, GPTQ) and avoids double-quantization by skipping bitsandbytes configuration setup dynamically.
+- **Pre-Quantized Model Auto-Bypass:** Automatically detects pre-quantized models (e.g. AWQ, GPTQ) and avoids double-quantization dynamically.
 - **Multi-Batch Cache Concurrency:** Re-engineered key-value compression to natively support parallel concurrent batched generation sessions (`batch_size >= 1`), maintaining perfect mathematical validation and rate-distortion parity.
 - **Immediate Disconnect & Interrupt Propagation:** Actively listens to client termination events (e.g. closed tabs) and terminates active Hugging Face inference threads in real-time, instantly freeing GPU capacity and preventing upstream memory leaks.
 - **Early Schema Validation:** Added lightweight gateway check gates to early-reject malformed requests before backend dispatching.
@@ -146,11 +145,11 @@ You can find the original core engine repository at [Dynamis-Labs/spectralquant]
 - **High-Performance Fleet Routing:** Refactored `docker-compose.yml` to support pinning the fast 7B model to wider-bus RTX 2080 Ti backends (`device_ids: ['${GPU_DEVICE_ID:-0}']` with 616 GB/s bandwidth), while directing massive 30B models to pooled dual RTX 3060 VRAM instances (24GB).
 
 **v1.1.2:**
-- **8-Bit (INT8) Quantization:** Added support for `LOAD_IN_8BIT=true` to enable INT8 quantization via bitsandbytes, and included a dedicated `calibrate_8bit.py` script.
+- **8-Bit (INT8) Quantization:** Added support for INT8 quantization and included a dedicated `calibrate_8bit.py` script.
 
 **v1.1.1:**
 - **Infrastructure Stability:** Added `docker-compose` health checks, `always` restart policies, and enforced startup ordering (`depends_on: service_healthy`) to ensure the Node.js bridge waits for the PyTorch backend to fully initialize.
-- **4-Bit (NF4) Quantization:** Native support for loading backend models in 4-bit precision via `bitsandbytes`, massively reducing baseline VRAM requirements while keeping the SpectralQuant KV cache intact. (Configurable via `LOAD_IN_4BIT=true`).
+- **4-Bit (NF4) Quantization:** Native support for loading backend models in 4-bit precision, massively reducing baseline VRAM requirements while keeping the SpectralQuant KV cache intact.
 
 **v1.1.0:**
 - **Multi-GPU Support:** The backend proxy now fully supports `device_map="auto"` via accelerate, allowing SpectralQuant states and centroids to dynamically migrate to the correct active device.
