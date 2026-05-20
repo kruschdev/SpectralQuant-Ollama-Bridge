@@ -129,6 +129,16 @@ You can find the original core engine repository at [Dynamis-Labs/spectralquant]
 
 ## Compatibility Updates
 
+**v1.3.0:**
+- **PyTorch `torch.compile` JIT Fusion:** Fused cache quantization and decompression routines into fast GPU kernels using PyTorch's Inductor JIT compiler, significantly reducing Python runtime overhead. Added a working C++ compiler (`g++`) inside the backend container to support Triton/CPU compilation loops.
+- **High-Performance Keep-Alive Pooling:** Configured global `undici` socket connection pooling within the Express proxy (`connections: 100`, 10 min timeout), eliminating socket handshake and connection setup latency for high-frequency queries.
+- **Zero-Copy Stream Forwarding:** Implemented fast, parsing-free SSE stream piping (`Readable.from(response.body).pipe(res)`) on `/v1/chat/completions`, eliminating JSON-parsing overhead.
+- **Pre-Quantized Model Auto-Bypass:** Automatically detects pre-quantized models (e.g. AWQ, GPTQ) and avoids double-quantization by skipping bitsandbytes configuration setup dynamically.
+- **Multi-Batch Cache Concurrency:** Re-engineered key-value compression to natively support parallel concurrent batched generation sessions (`batch_size >= 1`), maintaining perfect mathematical validation and rate-distortion parity.
+- **Immediate Disconnect & Interrupt Propagation:** Actively listens to client termination events (e.g. closed tabs) and terminates active Hugging Face inference threads in real-time, instantly freeing GPU capacity and preventing upstream memory leaks.
+- **Early Schema Validation:** Added lightweight gateway check gates to early-reject malformed requests before backend dispatching.
+- **Modernized Backend builds:** Swapped legacy setuptools backend with modern PEP 517 `setuptools.build_meta` to guarantee robust and reproducible container creations across environments.
+
 **v1.2.0:**
 - **Zero-Leak Key Cache Compression:** Re-engineered the PyTorch key modality to compute key reconstructions dynamically on-the-fly (`decompress_keys_pytorch`), dropping the static `k_mse` float16 tensor from persistent memory. This plugs the critical KV-cache VRAM leak and restores true 10x memory savings during long-sequence generation.
 - **Pristine Mathematical Parity:** Designed full dynamic reconstruction backward-compatibility. The new layer gracefully handles legacy cache structures with zero API disruption.
