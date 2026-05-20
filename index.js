@@ -1,5 +1,16 @@
 import express from 'express';
 import cors from 'cors';
+import { setGlobalDispatcher, Agent } from 'undici';
+import { Readable } from 'stream';
+
+// Configure high-performance global agent pooling
+const globalAgent = new Agent({
+    keepAliveTimeout: 10 * 60 * 1000, // 10 minutes keep-alive
+    keepAliveMaxTimeout: 15 * 60 * 1000,
+    connections: 100, // Max concurrent sockets in the pool
+    pipelining: 1
+});
+setGlobalDispatcher(globalAgent);
 
 const app = express();
 app.use(cors());
@@ -15,6 +26,36 @@ const PORT = process.env.PORT || 11437;
 const SPECTRALQUANT_URL = process.env.SPECTRALQUANT_URL || 'http://127.0.0.1:11436';
 const MOCK_MODEL_NAME = process.env.MOCK_MODEL_NAME || 'spectralquant:latest';
 const REWRITE_MODEL_TO = process.env.REWRITE_MODEL_TO || '';
+
+// --- Lightweight Input Validation Helpers ---
+function validateMessages(messages) {
+    if (!messages || !Array.isArray(messages)) {
+        return "messages field must be a valid array";
+    }
+    if (messages.length === 0) {
+        return "messages array cannot be empty";
+    }
+    for (let i = 0; i < messages.length; i++) {
+        const msg = messages[i];
+        if (!msg || typeof msg !== 'object') {
+            return `message at index ${i} must be a valid object`;
+        }
+        if (typeof msg.role !== 'string' || !msg.role.trim()) {
+            return `message at index ${i} must contain a valid string 'role'`;
+        }
+        if (typeof msg.content !== 'string' || !msg.content.trim()) {
+            return `message at index ${i} must contain a valid string 'content'`;
+        }
+    }
+    return null;
+}
+
+function validateGenerate(prompt) {
+    if (typeof prompt !== 'string' || !prompt.trim()) {
+        return "prompt field must be a non-empty string";
+    }
+    return null;
+}
 
 console.log(`\n======================================================`);
 console.log(`🚀 SpectralQuant ↔ Ollama Bridge`);
@@ -63,8 +104,21 @@ app.get('/api/tags', (req, res) => {
 
 // --- /api/chat ---
 app.post('/api/chat', async (req, res) => {
+    const controller = new AbortController();
+    res.on('close', () => {
+        console.log(`[CONN CLOSE] Client closed connection for /api/chat. Aborting backend request.`);
+        controller.abort();
+    });
+
     try {
         const { model, messages, stream = true } = req.body;
+        
+        const valErr = validateMessages(messages);
+        if (valErr) {
+            console.warn(`[VALIDATION WARN] Bad Request on /api/chat: ${valErr}`);
+            res.status(400).json({ error: "Bad Request", details: valErr });
+            return;
+        }
         
         const targetModel = REWRITE_MODEL_TO || model || MOCK_MODEL_NAME;
         const openaiReq = {
@@ -76,7 +130,8 @@ app.post('/api/chat', async (req, res) => {
         const response = await fetch(`${SPECTRALQUANT_URL}/v1/chat/completions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(openaiReq)
+            body: JSON.stringify(openaiReq),
+            signal: controller.signal
         });
 
         if (!response.ok) {
@@ -163,14 +218,29 @@ app.post('/api/chat', async (req, res) => {
         }
     } catch (e) {
         console.error(`[CHAT ERROR]`, e.message);
-        res.status(500).json({ error: e.message });
+        if (!res.headersSent) {
+            res.status(500).json({ error: e.message });
+        }
     }
 });
 
 // --- /api/generate ---
 app.post('/api/generate', async (req, res) => {
+    const controller = new AbortController();
+    res.on('close', () => {
+        console.log(`[CONN CLOSE] Client closed connection for /api/generate. Aborting backend request.`);
+        controller.abort();
+    });
+
     try {
         const { model, prompt, stream = true } = req.body;
+        
+        const valErr = validateGenerate(prompt);
+        if (valErr) {
+            console.warn(`[VALIDATION WARN] Bad Request on /api/generate: ${valErr}`);
+            res.status(400).json({ error: "Bad Request", details: valErr });
+            return;
+        }
         
         const targetModel = REWRITE_MODEL_TO || model || MOCK_MODEL_NAME;
         const openaiReq = {
@@ -182,7 +252,8 @@ app.post('/api/generate', async (req, res) => {
         const response = await fetch(`${SPECTRALQUANT_URL}/v1/chat/completions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(openaiReq)
+            body: JSON.stringify(openaiReq),
+            signal: controller.signal
         });
 
         if (!response.ok) {
@@ -260,7 +331,9 @@ app.post('/api/generate', async (req, res) => {
         }
     } catch (e) {
         console.error(`[GENERATE ERROR]`, e.message);
-        res.status(500).json({ error: e.message });
+        if (!res.headersSent) {
+            res.status(500).json({ error: e.message });
+        }
     }
 });
 
@@ -291,8 +364,22 @@ app.post('/api/embeddings', async (req, res) => {
 
 // --- /v1/chat/completions ---
 app.post('/v1/chat/completions', async (req, res) => {
+    const controller = new AbortController();
+    res.on('close', () => {
+        console.log(`[CONN CLOSE] Client closed connection for /v1/chat/completions. Aborting backend request.`);
+        controller.abort();
+    });
+
     try {
         const body = { ...req.body };
+        
+        const valErr = validateMessages(body.messages);
+        if (valErr) {
+            console.warn(`[VALIDATION WARN] Bad Request on /v1/chat/completions: ${valErr}`);
+            res.status(400).json({ error: "Bad Request", details: valErr });
+            return;
+        }
+        
         if (REWRITE_MODEL_TO && (body.model === MOCK_MODEL_NAME || !body.model || body.model === 'spectralquant:latest')) {
             body.model = REWRITE_MODEL_TO;
         }
@@ -300,7 +387,8 @@ app.post('/v1/chat/completions', async (req, res) => {
         const response = await fetch(`${SPECTRALQUANT_URL}/v1/chat/completions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
+            body: JSON.stringify(body),
+            signal: controller.signal
         });
 
         if (!response.ok) {
@@ -319,17 +407,12 @@ app.post('/v1/chat/completions', async (req, res) => {
             res.setHeader('X-Accel-Buffering', 'no');
         }
 
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder("utf-8");
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            res.write(value);
-        }
-        res.end();
+        Readable.from(response.body).pipe(res);
     } catch (e) {
         console.error(`[v1/chat/completions ERROR]`, e.message);
-        res.status(500).json({ error: e.message });
+        if (!res.headersSent) {
+            res.status(500).json({ error: e.message });
+        }
     }
 });
 

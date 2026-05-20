@@ -33,7 +33,7 @@ class SpectralQuantEngineManager:
             for h in range(n_kv_heads):
                 c = calibration_data[l][h]
                 
-                self.key_engines[(l, h)] = SpectralQuantEngine(
+                key_eng = SpectralQuantEngine(
                     eigenvectors=c["key_eigenvectors"].to(device),
                     eigenvalues=c["key_eigenvalues"].to(device),
                     d_eff=int(c["key_d_eff"]),
@@ -41,8 +41,24 @@ class SpectralQuantEngineManager:
                     total_bits=int(avg_bits),
                     device=device
                 )
+                if hasattr(torch, "compile"):
+                    try:
+                        key_eng._quantize_regime = torch.compile(
+                            key_eng._quantize_regime,
+                            mode="reduce-overhead",
+                            dynamic=True
+                        )
+                        key_eng.decompress_keys_pytorch = torch.compile(
+                            key_eng.decompress_keys_pytorch,
+                            mode="reduce-overhead",
+                            dynamic=True
+                        )
+                    except Exception as compile_err:
+                        import logging
+                        logging.getLogger("spectralquant").warning(f"Could not compile key engine: {compile_err}")
+                self.key_engines[(l, h)] = key_eng
                 
-                self.val_engines[(l, h)] = SpectralQuantEngine(
+                val_eng = SpectralQuantEngine(
                     eigenvectors=c["val_eigenvectors"].to(device),
                     eigenvalues=c["val_eigenvalues"].to(device),
                     d_eff=int(c["val_d_eff"]),
@@ -50,6 +66,22 @@ class SpectralQuantEngineManager:
                     total_bits=int(avg_bits),
                     device=device
                 )
+                if hasattr(torch, "compile"):
+                    try:
+                        val_eng._quantize_regime = torch.compile(
+                            val_eng._quantize_regime,
+                            mode="reduce-overhead",
+                            dynamic=True
+                        )
+                        val_eng.decompress_values_pytorch = torch.compile(
+                            val_eng.decompress_values_pytorch,
+                            mode="reduce-overhead",
+                            dynamic=True
+                        )
+                    except Exception as compile_err:
+                        import logging
+                        logging.getLogger("spectralquant").warning(f"Could not compile value engine: {compile_err}")
+                self.val_engines[(l, h)] = val_eng
     
     def get_engine(self, layer_idx: int, head_idx: int, modality: str):
         if modality == "key":
@@ -72,89 +104,98 @@ class SpectralQuantCache(DynamicCache):
         self.sq_value_cache: List[List[Dict[str, torch.Tensor]]] = []
         self._seen_tokens = 0
         
-    def _compress_states(self, states: torch.Tensor, layer_idx: int, modality: str) -> List[Dict[str, torch.Tensor]]:
+    def _compress_states(self, states: torch.Tensor, layer_idx: int, modality: str) -> List[List[Dict[str, torch.Tensor]]]:
         """
         states: [batch_size, num_heads, seq_len, head_dim]
-        Returns: list of compressed dicts, one for each head.
+        Returns: list of list of compressed dicts, shape [batch_size, num_heads]
         """
         batch_size, num_heads, seq_len, head_dim = states.shape
-        compressed_heads = []
-        for h in range(num_heads):
-            state_h = states[0, h, :, :]  # [seq_len, head_dim] (Assume batch_size=1)
-            engine = self.engine_manager.get_engine(layer_idx, h, modality)
-            if engine is None:
-                raise ValueError(f"No engine found for layer {layer_idx}, head {h}, modality {modality}")
+        compressed_batches = []
+        for b in range(batch_size):
+            compressed_heads = []
+            for h in range(num_heads):
+                state_h = states[b, h, :, :]  # [seq_len, head_dim]
+                engine = self.engine_manager.get_engine(layer_idx, h, modality)
+                if engine is None:
+                    raise ValueError(f"No engine found for layer {layer_idx}, head {h}, modality {modality}")
+                    
+                # Move engine tensors to the same device as the layer state
+                if getattr(engine, '_current_device', None) != state_h.device:
+                    engine.eigenvalues = engine.eigenvalues.to(state_h.device)
+                    engine.Pi = engine.Pi.to(state_h.device)
+                    engine.PiT = engine.PiT.to(state_h.device)
+                    engine.S = engine.S.to(state_h.device)
+                    engine.ST = engine.ST.to(state_h.device)
+                    if hasattr(engine, '_centroids_key_high'):
+                        engine._centroids_key_high = engine._centroids_key_high.to(state_h.device)
+                        engine._centroids_key_low = engine._centroids_key_low.to(state_h.device)
+                        engine._centroids_val_high = engine._centroids_val_high.to(state_h.device)
+                        engine._centroids_val_low = engine._centroids_val_low.to(state_h.device)
+                    engine._current_device = state_h.device
                 
-            # Move engine tensors to the same device as the layer state
-            if getattr(engine, '_current_device', None) != state_h.device:
-                engine.eigenvalues = engine.eigenvalues.to(state_h.device)
-                engine.Pi = engine.Pi.to(state_h.device)
-                engine.PiT = engine.PiT.to(state_h.device)
-                engine.S = engine.S.to(state_h.device)
-                engine.ST = engine.ST.to(state_h.device)
-                if hasattr(engine, '_centroids_key_high'):
-                    engine._centroids_key_high = engine._centroids_key_high.to(state_h.device)
-                    engine._centroids_key_low = engine._centroids_key_low.to(state_h.device)
-                    engine._centroids_val_high = engine._centroids_val_high.to(state_h.device)
-                    engine._centroids_val_low = engine._centroids_val_low.to(state_h.device)
-                engine._current_device = state_h.device
-            
-            if modality == "key":
-                comp = engine.compress_keys_pytorch(state_h)
-                # k_mse is omitted from the compressed dict to save massive VRAM
-            else:
-                comp = engine.compress_values_pytorch(state_h)
-            
-            compressed_heads.append(comp)
-        return compressed_heads
+                if modality == "key":
+                    comp = engine.compress_keys_pytorch(state_h)
+                    # k_mse is omitted from the compressed dict to save massive VRAM
+                else:
+                    comp = engine.compress_values_pytorch(state_h)
+                
+                compressed_heads.append(comp)
+            compressed_batches.append(compressed_heads)
+        return compressed_batches
 
-    def _decompress_states(self, compressed_heads: List[Dict[str, torch.Tensor]], layer_idx: int, modality: str) -> torch.Tensor:
+    def _decompress_states(self, compressed_batches: List[List[Dict[str, torch.Tensor]]], layer_idx: int, modality: str) -> torch.Tensor:
         """
         Reconstructs the full uncompressed state tensor from compressed head dicts.
         Returns: [batch_size, num_heads, seq_len, head_dim]
         """
-        uncompressed_heads = []
-        for h, comp in enumerate(compressed_heads):
-            engine = self.engine_manager.get_engine(layer_idx, h, modality)
-            
-            # Move engine tensors to the correct device first
-            state_device = comp["indices"].device
-            if getattr(engine, '_current_device', None) != state_device:
-                engine.eigenvalues = engine.eigenvalues.to(state_device)
-                engine.Pi = engine.Pi.to(state_device)
-                engine.PiT = engine.PiT.to(state_device)
-                engine.S = engine.S.to(state_device)
-                engine.ST = engine.ST.to(state_device)
-                if hasattr(engine, '_centroids_key_high'):
-                    engine._centroids_key_high = engine._centroids_key_high.to(state_device)
-                    engine._centroids_key_low = engine._centroids_key_low.to(state_device)
-                if hasattr(engine, '_centroids_val_high'):
-                    engine._centroids_val_high = engine._centroids_val_high.to(state_device)
-                    engine._centroids_val_low = engine._centroids_val_low.to(state_device)
-                engine._current_device = state_device
+        uncompressed_batches = []
+        for b, compressed_heads in enumerate(compressed_batches):
+            uncompressed_heads = []
+            for h, comp in enumerate(compressed_heads):
+                engine = self.engine_manager.get_engine(layer_idx, h, modality)
+                
+                # Move engine tensors to the correct device first
+                state_device = comp["indices"].device
+                if getattr(engine, '_current_device', None) != state_device:
+                    engine.eigenvalues = engine.eigenvalues.to(state_device)
+                    engine.Pi = engine.Pi.to(state_device)
+                    engine.PiT = engine.PiT.to(state_device)
+                    engine.S = engine.S.to(state_device)
+                    engine.ST = engine.ST.to(state_device)
+                    if hasattr(engine, '_centroids_key_high'):
+                        engine._centroids_key_high = engine._centroids_key_high.to(state_device)
+                        engine._centroids_key_low = engine._centroids_key_low.to(state_device)
+                    if hasattr(engine, '_centroids_val_high'):
+                        engine._centroids_val_high = engine._centroids_val_high.to(state_device)
+                        engine._centroids_val_low = engine._centroids_val_low.to(state_device)
+                    engine._current_device = state_device
 
-            if modality == "key":
-                recon_h = engine.decompress_keys_pytorch(comp)
-            else:
-                recon_h = engine.decompress_values_pytorch(comp)
-            
-            uncompressed_heads.append(recon_h)
-        return torch.stack(uncompressed_heads, dim=0).unsqueeze(0)  # [1, num_heads, seq_len, head_dim]
+                if modality == "key":
+                    recon_h = engine.decompress_keys_pytorch(comp)
+                else:
+                    recon_h = engine.decompress_values_pytorch(comp)
+                
+                uncompressed_heads.append(recon_h)
+            uncompressed_batches.append(torch.stack(uncompressed_heads, dim=0))
+        return torch.stack(uncompressed_batches, dim=0)  # [batch_size, num_heads, seq_len, head_dim]
 
-    def _concat_compressed(self, existing: List[Dict[str, torch.Tensor]], new: List[Dict[str, torch.Tensor]]) -> List[Dict[str, torch.Tensor]]:
+    def _concat_compressed(self, existing: List[List[Dict[str, torch.Tensor]]], new: List[List[Dict[str, torch.Tensor]]]) -> List[List[Dict[str, torch.Tensor]]]:
         """
-        Concatenates new compressed representations onto existing ones along the seq_len dimension (dim=1).
+        Concatenates new compressed representations onto existing ones along the seq_len dimension.
         """
         result = []
-        for e, n in zip(existing, new):
-            merged = {}
-            for k in e.keys():
-                if isinstance(e[k], torch.Tensor) and k in n:
-                    # Concatenate along seq_len which is dim 0 since we removed batch_size
-                    merged[k] = torch.cat([e[k], n[k]], dim=0)
-                else:
-                    merged[k] = e[k]
-            result.append(merged)
+        for e_batch, n_batch in zip(existing, new):
+            batch_result = []
+            for e, n in zip(e_batch, n_batch):
+                merged = {}
+                for k in e.keys():
+                    if isinstance(e[k], torch.Tensor) and k in n:
+                        # Concatenate along seq_len which is dim 0 since we removed batch_size
+                        merged[k] = torch.cat([e[k], n[k]], dim=0)
+                    else:
+                        merged[k] = e[k]
+                batch_result.append(merged)
+            result.append(batch_result)
         return result
 
     def update(
@@ -194,8 +235,8 @@ class SpectralQuantCache(DynamicCache):
     def get_seq_length(self, layer_idx: Optional[int] = 0) -> int:
         if len(self.sq_key_cache) <= layer_idx or len(self.sq_key_cache[layer_idx]) == 0:
             return 0
-        # The seq_len is dim=0 of the "indices" tensor
-        return self.sq_key_cache[layer_idx][0]["indices"].shape[0]
+        # The seq_len is dim=0 of the "indices" tensor of the first batch and head
+        return self.sq_key_cache[layer_idx][0][0]["indices"].shape[0]
 
     def get_max_length(self) -> Optional[int]:
         return None

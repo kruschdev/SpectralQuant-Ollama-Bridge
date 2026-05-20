@@ -1,9 +1,12 @@
 import os
 import logging
 from typing import List, Optional, Dict, Any
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 import torch
+from transformers import StoppingCriteria, StoppingCriteriaList
+import threading
+import asyncio
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 logging.basicConfig(level=logging.INFO)
@@ -28,6 +31,13 @@ from threading import Thread
 from transformers import TextIteratorStreamer
 from fastapi.responses import StreamingResponse
 
+class StopOnSignal(StoppingCriteria):
+    def __init__(self, stop_event: threading.Event):
+        self.stop_event = stop_event
+        
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs) -> bool:
+        return self.stop_event.is_set()
+
 # OpenAI Compatible Request Schemas
 class Message(BaseModel):
     role: str
@@ -50,8 +60,12 @@ async def lifespan(app: FastAPI):
         tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, local_files_only=LOCAL_FILES_ONLY)
         load_kwargs = {
             "device_map": "auto", "local_files_only": LOCAL_FILES_ONLY,
+            "attn_implementation": "sdpa",
         }
-        if LOAD_IN_4BIT:
+        is_pre_quantized = any(q in MODEL_NAME.lower() for q in ["awq", "gptq", "exl2"])
+        if is_pre_quantized:
+            logger.info(f"Pre-quantized model format detected ({MODEL_NAME}). Bypassing bitsandbytes config to use native pre-quantized kernels.")
+        elif LOAD_IN_4BIT:
             from transformers import BitsAndBytesConfig
             load_kwargs["quantization_config"] = BitsAndBytesConfig(
                 load_in_4bit=True,
@@ -159,7 +173,7 @@ def health():
     return {"status": "ok", "model": MODEL_NAME, "device": DEVICE}
 
 @app.post("/v1/chat/completions")
-def chat_completions(req: ChatCompletionRequest):
+async def chat_completions(req: ChatCompletionRequest, request: Request):
     if model is None or tokenizer is None:
         raise HTTPException(status_code=503, detail="Model not loaded yet.")
         
@@ -186,6 +200,19 @@ def chat_completions(req: ChatCompletionRequest):
         if engine_manager is not None:
             past_key_values = SpectralQuantCache(engine_manager)
             
+        stop_event = threading.Event()
+        
+        async def monitor_disconnect():
+            while not stop_event.is_set():
+                if await request.is_disconnected():
+                    logger.info("Client disconnected. Aborting generation.")
+                    stop_event.set()
+                    break
+                await asyncio.sleep(0.1)
+        
+        loop = asyncio.get_running_loop()
+        monitor_task = loop.create_task(monitor_disconnect())
+        
         if getattr(req, "stream", False):
             streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
             generation_kwargs = dict(
@@ -195,39 +222,75 @@ def chat_completions(req: ChatCompletionRequest):
                 do_sample=req.temperature > 0,
                 pad_token_id=tokenizer.eos_token_id,
                 past_key_values=past_key_values,
-                streamer=streamer
+                streamer=streamer,
+                stopping_criteria=StoppingCriteriaList([StopOnSignal(stop_event)])
             )
             thread = Thread(target=model.generate, kwargs=generation_kwargs)
             thread.start()
             
-            def sse_generator():
-                for text in streamer:
-                    if text:
-                        chunk = {
-                            "id": "chatcmpl-spectralquant",
-                            "object": "chat.completion.chunk",
-                            "model": req.model,
-                            "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}]
-                        }
-                        yield f"data: {json.dumps(chunk)}\n\n"
-                yield f"data: {json.dumps({'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]})}\n\n"
-                yield "data: [DONE]\n\n"
+            async def sse_generator():
+                import queue
+                try:
+                    while True:
+                        if stop_event.is_set():
+                            break
+                        try:
+                            text = streamer.queue.get_nowait()
+                            if text is None:
+                                break
+                            if text:
+                                chunk = {
+                                    "id": "chatcmpl-spectralquant",
+                                    "object": "chat.completion.chunk",
+                                    "model": req.model,
+                                    "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}]
+                                }
+                                yield f"data: {json.dumps(chunk)}\n\n"
+                        except queue.Empty:
+                            await asyncio.sleep(0.02)
+                    yield f"data: {json.dumps({'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]})}\n\n"
+                    yield "data: [DONE]\n\n"
+                except Exception as e:
+                    logger.error(f"Error in stream: {e}")
+                finally:
+                    stop_event.set()
+                    await monitor_task
             
             return StreamingResponse(sse_generator(), media_type="text/event-stream")
             
         else:
-            outputs = model.generate(
-                **inputs, 
-                max_new_tokens=req.max_tokens,
-                temperature=req.temperature,
-                do_sample=req.temperature > 0,
-                pad_token_id=tokenizer.eos_token_id,
-                past_key_values=past_key_values
-            )
-    
+            outputs = []
+            def run_gen():
+                try:
+                    out = model.generate(
+                        **inputs, 
+                        max_new_tokens=req.max_tokens,
+                        temperature=req.temperature,
+                        do_sample=req.temperature > 0,
+                        pad_token_id=tokenizer.eos_token_id,
+                        past_key_values=past_key_values,
+                        stopping_criteria=StoppingCriteriaList([StopOnSignal(stop_event)])
+                    )
+                    outputs.append(out)
+                except Exception as e:
+                    logger.error(f"Generation thread error: {e}")
+            
+            thread = Thread(target=run_gen)
+            thread.start()
+            
+            while thread.is_alive():
+                await asyncio.sleep(0.05)
+                
+            stop_event.set()
+            await monitor_task
+            
+            if not outputs:
+                raise HTTPException(status_code=500, detail="Generation was aborted or failed.")
+            
+            outputs_tensor = outputs[0]
             # Extract only the newly generated tokens
             input_len = inputs["input_ids"].shape[1]
-            generated_tokens = outputs[0][input_len:]
+            generated_tokens = outputs_tensor[0][input_len:]
             response_text = tokenizer.decode(generated_tokens, skip_special_tokens=True)
             
             return {
