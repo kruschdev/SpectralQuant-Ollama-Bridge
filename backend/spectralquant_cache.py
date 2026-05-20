@@ -101,7 +101,7 @@ class SpectralQuantCache(DynamicCache):
             
             if modality == "key":
                 comp = engine.compress_keys_pytorch(state_h)
-                # k_mse contains the direct MSE reconstruction - keep it
+                # k_mse is omitted from the compressed dict to save massive VRAM
             else:
                 comp = engine.compress_values_pytorch(state_h)
             
@@ -117,23 +117,25 @@ class SpectralQuantCache(DynamicCache):
         for h, comp in enumerate(compressed_heads):
             engine = self.engine_manager.get_engine(layer_idx, h, modality)
             
+            # Move engine tensors to the correct device first
+            state_device = comp["indices"].device
+            if getattr(engine, '_current_device', None) != state_device:
+                engine.eigenvalues = engine.eigenvalues.to(state_device)
+                engine.Pi = engine.Pi.to(state_device)
+                engine.PiT = engine.PiT.to(state_device)
+                engine.S = engine.S.to(state_device)
+                engine.ST = engine.ST.to(state_device)
+                if hasattr(engine, '_centroids_key_high'):
+                    engine._centroids_key_high = engine._centroids_key_high.to(state_device)
+                    engine._centroids_key_low = engine._centroids_key_low.to(state_device)
+                if hasattr(engine, '_centroids_val_high'):
+                    engine._centroids_val_high = engine._centroids_val_high.to(state_device)
+                    engine._centroids_val_low = engine._centroids_val_low.to(state_device)
+                engine._current_device = state_device
+
             if modality == "key":
-                # Use the pre-computed MSE reconstruction
-                recon_h = comp["k_mse"].to(torch.bfloat16)
+                recon_h = engine.decompress_keys_pytorch(comp)
             else:
-                # Use the engine's own decompress method
-                # Move engine tensors to the correct device first
-                state_device = comp["indices"].device
-                if getattr(engine, '_current_device', None) != state_device:
-                    engine.eigenvalues = engine.eigenvalues.to(state_device)
-                    engine.Pi = engine.Pi.to(state_device)
-                    engine.PiT = engine.PiT.to(state_device)
-                    engine.S = engine.S.to(state_device)
-                    engine.ST = engine.ST.to(state_device)
-                    if hasattr(engine, '_centroids_val_high'):
-                        engine._centroids_val_high = engine._centroids_val_high.to(state_device)
-                        engine._centroids_val_low = engine._centroids_val_low.to(state_device)
-                    engine._current_device = state_device
                 recon_h = engine.decompress_values_pytorch(comp)
             
             uncompressed_heads.append(recon_h)

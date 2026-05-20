@@ -582,7 +582,6 @@ class SpectralQuantEngine(TurboQuantEngine):
 
         return {
             "indices":        indices,
-            "k_mse":          k_mse.half(),
             "qjl_signs":      full_signs,
             "vec_norms":      vec_norms.squeeze(-1).half(),
             "residual_norms": residual_norms.half(),
@@ -597,6 +596,39 @@ class SpectralQuantEngine(TurboQuantEngine):
                 if self._semantic_bits_per_dim is not None else None
             ),
         }
+
+    @torch.no_grad()
+    def decompress_keys_pytorch(self, compressed_k: dict) -> torch.Tensor:
+        """Reconstruct keys from the two-regime compressed representation.
+
+        Uses separate codebooks for semantic and tail regimes, then
+        un-rotates by V (= ``self.Pi``) to return to the original basis.
+
+        Args:
+            compressed_k: Dict as returned by ``compress_keys_pytorch``.
+
+        Returns:
+            (seq_k, head_dim) reconstructed key vectors.
+        """
+        indices   = compressed_k["indices"]                           # (seq_k, head_dim) uint8
+        vec_norms = compressed_k["vec_norms"].float()                 # (seq_k,)
+        d_eff     = compressed_k["d_eff"]
+
+        # Split indices back into regimes.
+        idx_high = indices[:, :d_eff].long()
+        idx_low  = indices[:, d_eff:].long()
+
+        c_high = self._centroids_key_high.to(indices.device)
+        c_low  = self._centroids_key_low.to(indices.device)
+
+        y_hat_high = c_high[idx_high]                                  # (seq_k, d_eff)
+        y_hat_low  = c_low[idx_low]                                    # (seq_k, head_dim - d_eff)
+
+        y_hat = torch.cat([y_hat_high, y_hat_low], dim=-1)            # (seq_k, head_dim)
+
+        # Un-rotate: V @ y_hat (y_hat is in eigenbasis) then rescale.
+        reconstructed = (y_hat @ self.Pi.float()) * vec_norms.unsqueeze(-1)
+        return reconstructed.to(torch.bfloat16)
 
     # ------------------------------------------------------------------
     # Value compression (override)
@@ -743,7 +775,10 @@ class SpectralQuantEngine(TurboQuantEngine):
             (seq_q, seq_k) float32 attention logits (before softmax).
         """
         Q_f = Q.float()
-        k_mse  = compressed_k["k_mse"].float()                        # (seq_k, head_dim)
+        if "k_mse" in compressed_k:
+            k_mse = compressed_k["k_mse"].float()
+        else:
+            k_mse = self.decompress_keys_pytorch(compressed_k).float()
         signs  = compressed_k["qjl_signs"].float()                    # (seq_k, head_dim)
         r_norms = compressed_k["residual_norms"].float()               # (seq_k,)
 

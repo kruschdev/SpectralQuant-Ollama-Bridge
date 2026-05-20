@@ -27,15 +27,14 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: all
+              device_ids: ['${GPU_DEVICE_ID:-0}']
               capabilities: [gpu]
 
   spectralquant-bridge:
     build: .
     container_name: spectralquant-bridge
     restart: always
-    ports:
-      - "11437:11437"
+    network_mode: "host"
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:11437/health || exit 1"]
       interval: 30s
@@ -44,8 +43,7 @@ services:
       start_period: 10s
     environment:
       - PORT=11437
-      - SPECTRALQUANT_URL=http://spectralquant-server:11436
+      - SPECTRALQUANT_URL=${SPECTRALQUANT_URL:-http://10.0.0.85:11436}
       - MOCK_MODEL_NAME=spectralquant:latest
-    depends_on:
-      spectralquant-server:
-        condition: service_healthy
+      - FALLBACK_OLLAMA_URL=http://127.0.0.1:11434
+      - REWRITE_MODEL_TO=${REWRITE_MODEL_TO:-}

@@ -7,3 +7,10 @@ bridge.log
 .DS_Store
 .agent/
 GEMINI_INFLIGHT.md
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/

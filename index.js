@@ -14,12 +14,14 @@ app.use((req, res, next) => {
 const PORT = process.env.PORT || 11437;
 const SPECTRALQUANT_URL = process.env.SPECTRALQUANT_URL || 'http://127.0.0.1:11436';
 const MOCK_MODEL_NAME = process.env.MOCK_MODEL_NAME || 'spectralquant:latest';
+const REWRITE_MODEL_TO = process.env.REWRITE_MODEL_TO || '';
 
 console.log(`\n======================================================`);
 console.log(`🚀 SpectralQuant ↔ Ollama Bridge`);
 console.log(`📡 Listening on Port: ${PORT}`);
 console.log(`🔗 Target Backend: ${SPECTRALQUANT_URL}`);
 console.log(`🤖 Mock Model Name: ${MOCK_MODEL_NAME}`);
+console.log(`🔄 Rewrite Model To: ${REWRITE_MODEL_TO || 'None (Pass through)'}`);
 console.log(`======================================================\n`);
 
 // --- Health Check ---
@@ -27,8 +29,8 @@ app.get('/health', async (req, res) => {
     try {
         // Attempt to reach the backend to verify it is up
         const response = await fetch(`${SPECTRALQUANT_URL}/health`);
-        if (response.ok) {
-            res.json({ status: 'healthy', backend: 'reachable' });
+        if (response.ok || response.status === 404) {
+            res.json({ status: 'healthy', backend: 'reachable', code: response.status });
         } else {
             res.status(503).json({ status: 'degraded', backend: 'unreachable', details: response.statusText });
         }
@@ -64,8 +66,9 @@ app.post('/api/chat', async (req, res) => {
     try {
         const { model, messages, stream = true } = req.body;
         
+        const targetModel = REWRITE_MODEL_TO || model || MOCK_MODEL_NAME;
         const openaiReq = {
-            model: model || MOCK_MODEL_NAME,
+            model: targetModel,
             messages: messages,
             stream: stream
         };
@@ -87,6 +90,9 @@ app.post('/api/chat', async (req, res) => {
 
         if (stream) {
             res.setHeader('Content-Type', 'application/x-ndjson');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('X-Accel-Buffering', 'no');
             
             // Node 18+ fetch returns a web ReadableStream
             const reader = response.body.getReader();
@@ -166,8 +172,9 @@ app.post('/api/generate', async (req, res) => {
     try {
         const { model, prompt, stream = true } = req.body;
         
+        const targetModel = REWRITE_MODEL_TO || model || MOCK_MODEL_NAME;
         const openaiReq = {
-            model: model || MOCK_MODEL_NAME,
+            model: targetModel,
             messages: [{ role: 'user', content: prompt }],
             stream: stream
         };
@@ -189,6 +196,9 @@ app.post('/api/generate', async (req, res) => {
 
         if (stream) {
             res.setHeader('Content-Type', 'application/x-ndjson');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('X-Accel-Buffering', 'no');
             
             const reader = response.body.getReader();
             const decoder = new TextDecoder("utf-8");
@@ -274,6 +284,51 @@ app.post('/api/embeddings', async (req, res) => {
         res.json(data);
     } catch (e) {
         console.error(`[EMBEDDINGS ERROR]`, e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+
+// --- /v1/chat/completions ---
+app.post('/v1/chat/completions', async (req, res) => {
+    try {
+        const body = { ...req.body };
+        if (REWRITE_MODEL_TO && (body.model === MOCK_MODEL_NAME || !body.model || body.model === 'spectralquant:latest')) {
+            body.model = REWRITE_MODEL_TO;
+        }
+        console.log(`[v1/chat/completions] Forwarding to Backend: ${SPECTRALQUANT_URL}/v1/chat/completions (Model: ${body.model})`);
+        const response = await fetch(`${SPECTRALQUANT_URL}/v1/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            if (response.status === 429) {
+                res.status(429).json({ error: "Backend rate limit exceeded", details: errText });
+                return;
+            }
+            throw new Error(`Backend Error ${response.status}: ${errText}`);
+        }
+
+        res.setHeader('Content-Type', response.headers.get('content-type') || 'application/json');
+        if (body.stream) {
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('X-Accel-Buffering', 'no');
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            res.write(value);
+        }
+        res.end();
+    } catch (e) {
+        console.error(`[v1/chat/completions ERROR]`, e.message);
         res.status(500).json({ error: e.message });
     }
 });

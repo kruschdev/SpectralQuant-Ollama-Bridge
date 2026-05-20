@@ -16,6 +16,7 @@ AVG_BITS = float(os.environ.get("AVG_BITS", "6.0"))
 LOAD_IN_4BIT = os.environ.get("LOAD_IN_4BIT", "false").lower() in ("true", "1", "yes")
 LOAD_IN_8BIT = os.environ.get("LOAD_IN_8BIT", "false").lower() in ("true", "1", "yes")
 ENABLE_COMPRESSION = os.environ.get("ENABLE_COMPRESSION", "false").lower() in ("true", "1", "yes")
+LOCAL_FILES_ONLY = os.environ.get("LOCAL_FILES_ONLY", "false").lower() in ("true", "1", "yes")
 DEVICE = os.environ.get("DEVICE", "cuda" if torch.cuda.is_available() else "cpu")
 
 model = None
@@ -46,9 +47,9 @@ async def lifespan(app: FastAPI):
     global model, tokenizer, engine_manager
     logger.info(f"Loading model {MODEL_NAME} onto {DEVICE}...")
     try:
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, local_files_only=True)
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, local_files_only=LOCAL_FILES_ONLY)
         load_kwargs = {
-            "device_map": "auto", "local_files_only": True,
+            "device_map": "auto", "local_files_only": LOCAL_FILES_ONLY,
         }
         if LOAD_IN_4BIT:
             from transformers import BitsAndBytesConfig
@@ -164,7 +165,16 @@ def chat_completions(req: ChatCompletionRequest):
         
     # Format messages using the tokenizer's chat template
     messages_dicts = [{"role": msg.role, "content": msg.content} for msg in req.messages]
-    prompt_text = tokenizer.apply_chat_template(messages_dicts, add_generation_prompt=True, tokenize=False)
+    try:
+        prompt_text = tokenizer.apply_chat_template(messages_dicts, add_generation_prompt=True, tokenize=False)
+    except Exception as e:
+        logger.warning(f"Failed to apply chat template ({e}), falling back to raw conversation formatting.")
+        prompt_text = ""
+        for msg in messages_dicts:
+            role = msg["role"].capitalize()
+            content = msg["content"]
+            prompt_text += f"\n\n{role}: {content}"
+        prompt_text += "\n\nAssistant: "
     
     input_device = next(model.parameters()).device
     inputs = tokenizer(prompt_text, return_tensors="pt").to(input_device)
