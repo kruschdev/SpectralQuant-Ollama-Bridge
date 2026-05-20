@@ -89,8 +89,7 @@ async def lifespan(app: FastAPI):
         logger.error(f"Failed to load model: {e}")
         import traceback
         traceback.print_exc()
-        yield
-        return
+        raise e
     
     # Engine initialization — separate try block so model errors don't mask engine errors
     if ENABLE_COMPRESSION:
@@ -170,6 +169,8 @@ app = FastAPI(title="SpectralQuant Inference Proxy", lifespan=lifespan)
 
 @app.get("/health")
 def health():
+    if model is None or tokenizer is None:
+        raise HTTPException(status_code=503, detail="Model not loaded yet.")
     return {"status": "ok", "model": MODEL_NAME, "device": DEVICE}
 
 @app.post("/v1/chat/completions")
