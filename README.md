@@ -129,6 +129,12 @@ You can find the original core engine repository at [Dynamis-Labs/spectralquant]
 
 ## Compatibility Updates
 
+**v1.2.0:**
+- **Zero-Leak Key Cache Compression:** Re-engineered the PyTorch key modality to compute key reconstructions dynamically on-the-fly (`decompress_keys_pytorch`), dropping the static `k_mse` float16 tensor from persistent memory. This plugs the critical KV-cache VRAM leak and restores true 10x memory savings during long-sequence generation.
+- **Pristine Mathematical Parity:** Designed full dynamic reconstruction backward-compatibility. The new layer gracefully handles legacy cache structures with zero API disruption.
+- **SSE Stream Buffering Prevented:** Injected explicit real-time proxy headers (`X-Accel-Buffering: no`, `Cache-Control: no-cache`, `Connection: keep-alive`) to ensure streamed tokens emit to frontends instantly chunk-by-chunk.
+- **High-Performance Fleet Routing:** Refactored `docker-compose.yml` to support pinning the fast 7B model to wider-bus RTX 2080 Ti backends (`device_ids: ['${GPU_DEVICE_ID:-0}']` with 616 GB/s bandwidth), while directing massive 30B models to pooled dual RTX 3060 VRAM instances (24GB).
+
 **v1.1.2:**
 - **8-Bit (INT8) Quantization:** Added support for `LOAD_IN_8BIT=true` to enable INT8 quantization via bitsandbytes, and included a dedicated `calibrate_8bit.py` script.
 
