@@ -486,7 +486,7 @@ class SpectralQuantEngine(TurboQuantEngine):
         c = centroids.to(x.device)
         diffs = x.unsqueeze(-1) - c                     # (..., dim, n_levels)
         indices = diffs.abs().argmin(dim=-1).to(torch.uint8)
-        y_hat = c[indices.long()]                       # (..., dim)
+        y_hat = c[indices.long()].clone()                       # (..., dim)
         return indices, y_hat
 
     # ------------------------------------------------------------------

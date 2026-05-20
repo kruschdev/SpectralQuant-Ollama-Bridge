@@ -11,6 +11,10 @@ from pathlib import Path
 from datasets import load_dataset
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+import transformers
+# Monkeypatch to prevent dequantization/re-initialization OOMs during model load
+transformers.modeling_utils.PreTrainedModel._initialize_missing_keys = lambda *args, **kwargs: None
+
 
 # Ensure spectralquant is importable
 PROJECT_ROOT = Path(__file__).parent
@@ -20,7 +24,7 @@ from spectralquant.calibration import EigenspectralCalibrator
 
 def main():
     parser = argparse.ArgumentParser(description="Calibrate SpectralQuant for 8-bit models")
-    parser.add_argument("--model", default="Qwen/Qwen2.5-Coder-7B-Instruct",
+    parser.add_argument("--model", default="Qwen/Qwen3.5-9B",
                        help="HuggingFace model ID")
     parser.add_argument("--samples", type=int, default=100,
                        help="Number of calibration samples")
@@ -40,6 +44,8 @@ def main():
         model_id,
         device_map="auto",
         quantization_config=bnb_config,
+        low_cpu_mem_usage=True,
+        torch_dtype=torch.bfloat16,
     )
     
     print("Loading Wikitext-103 dataset...")

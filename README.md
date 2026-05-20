@@ -51,7 +51,7 @@ The repository is a "batteries-included" package containing both the **SpectralQ
 git clone https://github.com/kruschdev/spectralquant-ollama-bridge.git
 cd spectralquant-ollama-bridge
 
-# 2. Launch both the PyTorch backend and Node.js bridge
+# 2. Launch the Node.js bridge (routes to your host Ollama instance natively)
 docker compose up -d --build
 ```
 
@@ -65,7 +65,7 @@ You should see:
 ======================================================
 🚀 SpectralQuant ↔ Ollama Bridge
 📡 Listening on Port: 11437
-🔗 Target Backend: http://spectralquant-server:11436
+🔗 Target Backend: http://127.0.0.1:11434
 🤖 Mock Model Name: spectralquant:latest
 ======================================================
 ```
@@ -127,6 +127,10 @@ You can find the original core engine repository at [Dynamis-Labs/spectralquant]
 ---
 
 ## Compatibility Updates
+
+**v1.4.0:**
+- **Native Ollama Routing:** Deprecated the heavy, dedicated PyTorch `spectralquant-server` container. The bridge now transparently routes and translates requests directly to a native host Ollama instance (`http://127.0.0.1:11434`), eliminating redundant container dependencies.
+- **Model Aliasing:** Automatically rewrites `spectralquant:latest` requests to the configured host model (e.g., `qwen3.5:9b`).
 
 **v1.3.0:**
 - **PyTorch `torch.compile` JIT Fusion:** Fused cache quantization and decompression routines into fast GPU kernels using PyTorch's Inductor JIT compiler, significantly reducing Python runtime overhead. Added a working C++ compiler (`g++`) inside the backend container to support Triton/CPU compilation loops.

@@ -26,9 +26,7 @@ class SpectralQuantEngineManager:
         self.key_engines = {}
         self.val_engines = {}
         
-        n_layers = len(calibration_data)
-        
-        for l in range(n_layers):
+        for l in calibration_data.keys():
             n_kv_heads = len(calibration_data[l])
             for h in range(n_kv_heads):
                 c = calibration_data[l][h]
@@ -96,12 +94,13 @@ class SpectralQuantCache(DynamicCache):
     Instead of storing uncompressed tensors, it compresses keys and values
     into dictionaries and decompresses them during the update() call.
     """
-    def __init__(self, engine_manager: SpectralQuantEngineManager):
-        super().__init__()
+    def __init__(self, engine_manager: SpectralQuantEngineManager, config: Optional[Any] = None):
+        super().__init__(config=config)
         self.engine_manager = engine_manager
         
-        self.sq_key_cache: List[List[Dict[str, torch.Tensor]]] = []
-        self.sq_value_cache: List[List[Dict[str, torch.Tensor]]] = []
+        num_layers = len(self.layers) if hasattr(self, "layers") else 0
+        self.sq_key_cache: List[Any] = [[] for _ in range(num_layers)]
+        self.sq_value_cache: List[Any] = [[] for _ in range(num_layers)]
         self._seen_tokens = 0
         
     def _compress_states(self, states: torch.Tensor, layer_idx: int, modality: str) -> List[List[Dict[str, torch.Tensor]]]:
@@ -203,7 +202,8 @@ class SpectralQuantCache(DynamicCache):
         key_states: torch.Tensor,
         value_states: torch.Tensor,
         layer_idx: int,
-        cache_kwargs: Optional[Dict[str, Any]] = None,
+        *args,
+        **kwargs,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         
         # Ensure lists are large enough
@@ -211,11 +211,19 @@ class SpectralQuantCache(DynamicCache):
             self.sq_key_cache.extend([[] for _ in range(layer_idx + 1 - len(self.sq_key_cache))])
             self.sq_value_cache.extend([[] for _ in range(layer_idx + 1 - len(self.sq_value_cache))])
 
+        # Check if this layer has a compression engine (e.g. key engine for head 0 exists)
+        has_engine = self.engine_manager.get_engine(layer_idx, 0, "key") is not None
+        
+        if not has_engine:
+            # Delegate directly to parent DynamicCache/Cache class so that
+            # uncalibrated or linear layers handle their state updates correctly.
+            return super().update(key_states, value_states, layer_idx, *args, **kwargs)
+
         # Compress new states
         new_comp_keys = self._compress_states(key_states, layer_idx, modality="key")
         new_comp_vals = self._compress_states(value_states, layer_idx, modality="value")
         
-        if len(self.sq_key_cache[layer_idx]) == 0:
+        if len(self.sq_key_cache[layer_idx]) == 0 or isinstance(self.sq_key_cache[layer_idx], torch.Tensor):
             self.sq_key_cache[layer_idx] = new_comp_keys
             self.sq_value_cache[layer_idx] = new_comp_vals
         else:
@@ -234,9 +242,19 @@ class SpectralQuantCache(DynamicCache):
 
     def get_seq_length(self, layer_idx: Optional[int] = 0) -> int:
         if len(self.sq_key_cache) <= layer_idx or len(self.sq_key_cache[layer_idx]) == 0:
+            # Fallback to super/underlying layers
+            if layer_idx < len(self.layers):
+                layer = self.layers[layer_idx]
+                if hasattr(layer, "get_seq_length"):
+                    return layer.get_seq_length()
             return 0
-        # The seq_len is dim=0 of the "indices" tensor of the first batch and head
-        return self.sq_key_cache[layer_idx][0][0]["indices"].shape[0]
+        cache_item = self.sq_key_cache[layer_idx]
+        if isinstance(cache_item, torch.Tensor):
+            return cache_item.shape[-2]
+        if isinstance(cache_item, list) and len(cache_item) > 0:
+            # The seq_len is dim=0 of the "indices" tensor of the first batch and head
+            return cache_item[0][0]["indices"].shape[0]
+        return 0
 
     def get_max_length(self) -> Optional[int]:
         return None
@@ -247,28 +265,39 @@ class SpectralQuantCache(DynamicCache):
         return self
 
     def __getitem__(self, layer_idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        if layer_idx < len(self):
-            return (
-                self._decompress_states(self.sq_key_cache[layer_idx], layer_idx, "key"),
-                self._decompress_states(self.sq_value_cache[layer_idx], layer_idx, "value")
-            )
+        if layer_idx < len(self.layers):
+            has_engine = self.engine_manager.get_engine(layer_idx, 0, "key") is not None
+            if has_engine:
+                k_cache = self.sq_key_cache[layer_idx]
+                v_cache = self.sq_value_cache[layer_idx]
+                k_decomp = k_cache if isinstance(k_cache, torch.Tensor) else self._decompress_states(k_cache, layer_idx, "key")
+                v_decomp = v_cache if isinstance(v_cache, torch.Tensor) else self._decompress_states(v_cache, layer_idx, "value")
+                return k_decomp, v_decomp
+            else:
+                layer = self.layers[layer_idx]
+                keys = getattr(layer, "keys", None)
+                values = getattr(layer, "values", None)
+                return keys, values
         else:
-            raise KeyError(f"Cache only has {len(self)} layers")
+            raise KeyError(f"Cache only has {len(self.layers)} layers")
 
     def __iter__(self):
-        for layer_idx in range(len(self)):
-            yield (
-                self._decompress_states(self.sq_key_cache[layer_idx], layer_idx, "key"),
-                self._decompress_states(self.sq_value_cache[layer_idx], layer_idx, "value")
-            )
+        for layer_idx in range(len(self.layers)):
+            yield self[layer_idx]
 
     def __len__(self):
-        return len(self.sq_key_cache)
+        return len(self.layers)
 
     @property
     def key_cache(self) -> List[torch.Tensor]:
-        return [self._decompress_states(self.sq_key_cache[i], i, "key") for i in range(len(self))]
+        res = []
+        for i in range(len(self.layers)):
+            res.append(self[i][0])
+        return res
 
     @property
     def value_cache(self) -> List[torch.Tensor]:
-        return [self._decompress_states(self.sq_value_cache[i], i, "value") for i in range(len(self))]
+        res = []
+        for i in range(len(self.layers)):
+            res.append(self[i][1])
+        return res

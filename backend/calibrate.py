@@ -12,7 +12,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "spectralquant-src" / "src"))
 from spectralquant.calibration import EigenspectralCalibrator
 
 def main():
-    model_id = "Qwen/Qwen2.5-Coder-7B-Instruct"
+    model_id = "Qwen/Qwen3.5-9B"
     print(f"Loading tokenizer {model_id}...")
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     

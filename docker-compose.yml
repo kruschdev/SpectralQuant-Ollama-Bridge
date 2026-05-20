@@ -1,35 +1,6 @@
 version: '3.8'
 
 services:
-  spectralquant-server:
-    build: ./backend
-    container_name: spectralquant-server
-    restart: always
-    healthcheck:
-      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:11436/health')\" || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    ports:
-      - "11436:11436"
-    environment:
-      - MODEL_NAME=Qwen/Qwen2.5-Coder-7B-Instruct
-      - LOAD_IN_4BIT=true
-      # - LOAD_IN_8BIT=true
-      - HF_TOKEN=${HF_TOKEN}
-      - HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface
-    volumes:
-      - ~/.cache/huggingface:/root/.cache/huggingface
-      - ./backend:/app
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              device_ids: ['${GPU_DEVICE_ID:-0}']
-              capabilities: [gpu]
-
   spectralquant-bridge:
     build: .
     container_name: spectralquant-bridge
@@ -43,7 +14,7 @@ services:
       start_period: 10s
     environment:
       - PORT=11437
-      - SPECTRALQUANT_URL=${SPECTRALQUANT_URL:-http://10.0.0.85:11436}
+      - SPECTRALQUANT_URL=${SPECTRALQUANT_URL:-http://127.0.0.1:11434}
       - MOCK_MODEL_NAME=spectralquant:latest
       - FALLBACK_OLLAMA_URL=http://127.0.0.1:11434
-      - REWRITE_MODEL_TO=${REWRITE_MODEL_TO:-}
+      - REWRITE_MODEL_TO=${REWRITE_MODEL_TO:-qwen3.5:9b}

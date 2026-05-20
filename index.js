@@ -69,7 +69,7 @@ console.log(`======================================================\n`);
 app.get('/health', async (req, res) => {
     try {
         // Attempt to reach the backend to verify it is up
-        const response = await fetch(`${SPECTRALQUANT_URL}/health`);
+        const response = await fetch(`${SPECTRALQUANT_URL}/`);
         if (response.ok || response.status === 404) {
             res.json({ status: 'healthy', backend: 'reachable', code: response.status });
         } else {

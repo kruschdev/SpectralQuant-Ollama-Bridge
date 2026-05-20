@@ -14,3 +14,6 @@ __pycache__/
 .pytest_cache/
 .coverage
 htmlcov/
+JEAN_INFLIGHT.md
+JEAN_SRE_INFLIGHT.md
+data/*.jsonl

@@ -8,13 +8,17 @@ from transformers import StoppingCriteria, StoppingCriteriaList
 import threading
 import asyncio
 from transformers import AutoModelForCausalLM, AutoTokenizer
+import transformers
+# Monkeypatch to prevent dequantization/re-initialization OOMs during model load
+transformers.modeling_utils.PreTrainedModel._initialize_missing_keys = lambda *args, **kwargs: None
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 # Environment configuration
-MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-Coder-7B-Instruct")
+MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen3.5-9B")
 AVG_BITS = float(os.environ.get("AVG_BITS", "6.0"))
 LOAD_IN_4BIT = os.environ.get("LOAD_IN_4BIT", "false").lower() in ("true", "1", "yes")
 LOAD_IN_8BIT = os.environ.get("LOAD_IN_8BIT", "false").lower() in ("true", "1", "yes")
@@ -59,8 +63,11 @@ async def lifespan(app: FastAPI):
     try:
         tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, local_files_only=LOCAL_FILES_ONLY)
         load_kwargs = {
-            "device_map": "auto", "local_files_only": LOCAL_FILES_ONLY,
+            "device_map": "auto", 
+            "local_files_only": LOCAL_FILES_ONLY,
             "attn_implementation": "sdpa",
+            "low_cpu_mem_usage": True,
+            "torch_dtype": torch.bfloat16,
         }
         is_pre_quantized = any(q in MODEL_NAME.lower() for q in ["awq", "gptq", "exl2"])
         if is_pre_quantized:
@@ -81,6 +88,10 @@ async def lifespan(app: FastAPI):
             logger.info("Loading model in 8-bit quantization (bitsandbytes INT8)")
         else:
             load_kwargs["torch_dtype"] = torch.bfloat16
+        
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            
         model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, **load_kwargs)
         model.eval()
         logger.info("Model loaded successfully.")
@@ -199,7 +210,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         from spectralquant_cache import SpectralQuantCache
         past_key_values = None
         if engine_manager is not None:
-            past_key_values = SpectralQuantCache(engine_manager)
+            past_key_values = SpectralQuantCache(engine_manager, config=model.config)
             
         stop_event = threading.Event()
         
